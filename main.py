@@ -23,6 +23,7 @@ class Planning(StatesGroup): # Планировщик (состояния)
 	date_choise = State() # Состояние, когда пользователь вводит дату
 	setting_plan_name = State()
 	checking_plans = State()
+	chose_for_delete = State()
 
 @router.message(Command("start"))
 async def echo_msg(message: types.Message):
@@ -86,8 +87,8 @@ async def timeGot(message: types.Message, state: FSMContext):
 		# Если дата выходит за рамки (типа 40.13.2000 33:33)
 		await bot.send_message(message.chat.id, 'Введена некорректная дата!')
 	finally:
-		await state.clear()
-		await bot.send_message(message.chat.id, 'Что дальше?', reply_markup=keyboards.menu)
+		await bot.send_message(message.chat.id, 'Планировщик задач', reply_markup=keyboards.planner_kb)
+		await state.set_state(Planning.planner)
 
 # Если регулярка не прошла проверку
 @router.message(Planning.date_choise)
@@ -105,15 +106,33 @@ async def checkPlans(query: types.CallbackQuery, state: FSMContext):
 	if(len(jobsList) == 0):
 		await bot.send_message(query.message.chat.id, 'В планировщике пусто 👻👀', reply_markup=keyboards.planner_kb)
 		return
-	itemsForDisplay = as_marked_list(*list(map(lambda x: f"{x.name} ({x.next_run_time.strftime('%d %b %Y, %H:%M')})", jobsList)), marker="♦ ")
+	itemsForDisplay = as_marked_list(*list(map(lambda x: f"{x.name} ({x.next_run_time.strftime('%d %b %Y, %H:%M')})", jobsList)), marker="✅  ")
 	await bot.send_message(query.message.chat.id, **itemsForDisplay.as_kwargs(), reply_markup=keyboards.plans_list_kb)
 	await state.set_state(Planning.checking_plans)
 
-@router.callback_query(Planning.planner, F.data == "clearPlanner")
+@router.callback_query(Planning.checking_plans, F.data == "clearPlanner")
 async def clearPlanner(query: types.CallbackQuery, state: FSMContext):
-	jobsList = scheduler.remove_all_jobs()
+	scheduler.remove_all_jobs()
 	await bot.send_message(query.message.chat.id, 'Успешно удалены все задачи', reply_markup=keyboards.menu)
 	await state.clear()
+
+
+@router.callback_query(Planning.checking_plans, F.data == "removePlan")
+async def removePlan(query: types.CallbackQuery, state: FSMContext):
+	jobsList = scheduler.get_jobs()
+	dynamicKeyboard = keyboards.createKeyboard(jobsList)
+	await bot.send_message(query.message.chat.id, 'Выберите задачу для удаления', reply_markup=dynamicKeyboard)
+	await state.set_state(Planning.chose_for_delete)
+
+
+@router.callback_query(Planning.chose_for_delete)
+async def removingPlan(query: types.CallbackQuery, state: FSMContext):
+	jobsList = scheduler.get_jobs()
+	#idRemovingPlan = jobsList
+	scheduler.remove_job(str(query.data))
+	await bot.send_message(query.message.chat.id, f'Задача {str(query.data)} успешно удалена')
+	await bot.send_message(query.message.chat.id, 'Планировщик задач', reply_markup=keyboards.planner_kb)
+	await state.set_state(Planning.planner)
 
 
 @router.message()
