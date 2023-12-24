@@ -17,8 +17,25 @@ plans_list = [
     [InlineKeyboardButton(text="◀️ Выйти в меню", callback_data="menu")]
 ]
 
+dates = [
+    [InlineKeyboardButton(text="Сегодня", callback_data="choseToday")],
+    [InlineKeyboardButton(text="Завтра", callback_data="choseTomorrow"),
+    InlineKeyboardButton(text="Послезавтра", callback_data="choseDayAfterTomorrow")]
+]
+
+times = [
+    [InlineKeyboardButton(text="10:00", callback_data="time10:00"),
+    InlineKeyboardButton(text="12:00", callback_data="time12:00"),
+    InlineKeyboardButton(text="15:00", callback_data="time15:00")],
+    [InlineKeyboardButton(text="18:00", callback_data="time18:00"),
+    InlineKeyboardButton(text="20:00", callback_data="time20:00"),
+    InlineKeyboardButton(text="22:00", callback_data="time22:00")],
+]
+
 plans_list_kb = InlineKeyboardMarkup(inline_keyboard=plans_list)
 planner_kb = InlineKeyboardMarkup(inline_keyboard=planner)
+dates_kb = InlineKeyboardMarkup(inline_keyboard=dates)
+times_kb = InlineKeyboardMarkup(inline_keyboard=times)
 menu = InlineKeyboardMarkup(inline_keyboard=menu)
 
 # Создать динамическую клавиатуру

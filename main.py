@@ -21,6 +21,7 @@ scheduler = AsyncIOScheduler()
 class Planning(StatesGroup): # Планировщик (состояния)
 	planner = State() 
 	date_choise = State() # Состояние, когда пользователь вводит дату
+	time_choise = State() # Состояние, когда пользователь вводит время
 	setting_plan_name = State()
 	checking_plans = State()
 	chose_for_delete = State()
@@ -58,13 +59,28 @@ async def inputPlanName(query: types.CallbackQuery, state: FSMContext):
 @router.message(Planning.setting_plan_name, F.text)
 async def inputPlanTime(message: types.Message, state: FSMContext):
 	await state.update_data(planName = message.text)
-	await bot.send_message(message.chat.id, 'Введите дату (день.месяц.год часы:минуты), когда вам необходимо получить уведомление:')
+	await bot.send_message(message.chat.id, 'Введите дату (день.месяц.год часы:минуты) или воспользуйтесь вариантами на клавиатуре, когда вам необходимо получить уведомление:', reply_markup=keyboards.dates_kb)
 	await state.set_state(Planning.date_choise)
 
 #Если от пользователя пришел не текст
 @router.message(Planning.setting_plan_name)
 async def inputPlanTime(message: types.Message, state: FSMContext):
 	await bot.send_message(message.chat.id, 'Упс! Попробуй ввести название события еще раз')
+	
+@router.callback_query(Planning.date_choise, F.data.in_(["choseToday", "choseTomorrow", "choseDayAfterTomorrow"]))
+async def timeGotByKb(query: types.CallbackQuery, state: FSMContext):
+	todayDate = time.localtime(time.time())
+	targetDate = todayDate
+	match str(query.data):
+		case "choseToday":	
+			targetDate = todayDate
+		case "choseTomorrow":
+			targetDate = time.localtime(time.mktime(todayDate) + 86400)
+		case "choseDayAfterTomorrow":
+			targetDate = time.localtime(time.mktime(todayDate) + 86400*2)
+	await state.update_data(target_date = targetDate)
+	await bot.send_message(query.message.chat.id, 'Теперь введите время (часы:минуты) или выберите из вариантов на клавиатуре:', reply_markup=keyboards.times_kb)
+	await state.set_state(Planning.time_choise)
 
 # Дата выбрана, создаем работу scheduler'у, если это возможно
 @router.message(Planning.date_choise, F.text.regexp(r'\d{1,2}.\d{1,2}.\d{4}\s+\d{1,2}:\d{2}'))
@@ -90,10 +106,65 @@ async def timeGot(message: types.Message, state: FSMContext):
 		await bot.send_message(message.chat.id, 'Планировщик задач', reply_markup=keyboards.planner_kb)
 		await state.set_state(Planning.planner)
 
+
+@router.callback_query(Planning.time_choise, F.data.in_(["time10:00", "time12:00", "time15:00", "time18:00", "time20:00", "time22:00"]))
+async def createNotifByQuery(query: types.CallbackQuery, state: FSMContext):
+	try:
+		user_data = await state.get_data()
+		targetDate = user_data['target_date']
+		targetTime = time.strptime(str(query.data).replace("time", ""), "%H:%M")
+		jobsCntr = len(scheduler.get_jobs())
+		jobid = f"job_{jobsCntr+1}_{query.message.chat.id}"
+		scheduler.add_job(
+			sendNotification,
+			"date",
+			run_date=datetime(targetDate.tm_year, targetDate.tm_mon, targetDate.tm_mday, targetTime.tm_hour, targetTime.tm_min),
+			args=(query.message.chat.id, user_data['planName'], ), #это кортеж touple
+			name=user_data['planName'],
+			id=jobid
+		)
+		await bot.send_message(query.message.chat.id, 'Событие успешно внесено в список дел!')
+	except ValueError:
+		# Если дата выходит за рамки (типа 40.13.2000 33:33)
+		await bot.send_message(query.message.chat.id, 'Введена некорректная дата!')
+	finally:
+		await bot.send_message(query.message.chat.id, 'Планировщик задач', reply_markup=keyboards.planner_kb)
+		await state.set_state(Planning.planner)
+
+
+@router.message(Planning.time_choise, F.text.regexp(r'\d{1,2}:\d{2}'))
+async def timeOnlyGot(message: types.Message, state: FSMContext):
+	try:
+		user_data = await state.get_data()
+		targetDate = user_data['target_date']
+		targetTime = time.strptime(message.text, "%H:%M")
+		jobsCntr = len(scheduler.get_jobs())
+		jobid = f"job_{jobsCntr+1}_{message.chat.id}"
+		scheduler.add_job(
+			sendNotification,
+			"date",
+			run_date=datetime(targetDate.tm_year, targetDate.tm_mon, targetDate.tm_mday, targetTime.tm_hour, targetTime.tm_min),
+			args=(message.chat.id, user_data['planName'], ), #это кортеж touple
+			name=user_data['planName'],
+			id=jobid
+		)
+		await bot.send_message(message.chat.id, 'Событие успешно внесено в список дел!')
+	except ValueError:
+		# Если дата выходит за рамки (типа 40.13.2000 33:33)
+		await bot.send_message(message.chat.id, 'Введена некорректная дата!')
+	finally:
+		await bot.send_message(message.chat.id, 'Планировщик задач', reply_markup=keyboards.planner_kb)
+		await state.set_state(Planning.planner)
+
 # Если регулярка не прошла проверку
 @router.message(Planning.date_choise)
-async def timeGotIncorrect(message: types.Message):
+async def dateGotIncorrect(message: types.Message):
 	await bot.send_message(message.chat.id, 'Введенная дата некорректна, попробуйте еще раз')
+
+# Если регулярка не прошла проверку
+@router.message(Planning.time_choise)
+async def timeGotIncorrect(message: types.Message):
+	await bot.send_message(message.chat.id, 'Введенное время некорректно, попробуйте еще раз')
 
 # Непосредственно функция отправки уведомления
 async def sendNotification(chatid, text):
